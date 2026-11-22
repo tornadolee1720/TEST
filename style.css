@@ -7,3 +7,7 @@
 /* Drum feedback sits above the controls without covering the camera. */
 .drum-status{text-align:center;color:#ffd6aa;font-size:12px;line-height:1.4;margin:0 0 5px;text-shadow:0 1px 6px #000;min-height:17px}
 @media(max-width:700px){.drum-status{font-size:11px}}
+
+/* V7: palm-sweep status and playing feedback. */
+.strum-status{text-align:center;color:#b9fff1;font-size:12px;font-weight:650;min-height:17px;line-height:1.35;margin-bottom:5px;text-shadow:0 1px 7px #000}
+@media(max-width:700px){.strum-status{font-size:11px}}
