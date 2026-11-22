@@ -7,19 +7,76 @@ const HUE=[43,168,202,315,62,124,270,10,189,339];
 const SCALE=[['C4',261.63],['D4',293.66],['E4',329.63],['G4',392],['A4',440],['C5',523.25],['D5',587.33],['E5',659.25],['G5',783.99],['A5',880]];
 const MAX_STRINGS=10,HOLD_MS=1000;
 const strings=[]; 
-let mode='idle',facing='user',stream=null,model=null,audio=null,hands=[],smoothed=[],particles=[],oldHands=[],interval=65,lastInfer=0,lastVideoTime=-1,lastFrame=0,frameN=0,fpsFrom=performance.now(),raf=0,cover=null,demoMouse={x:.7,y:.52,active:false};
+let mode='idle',facing='user',stream=null,model=null,audio=null,hands=[],smoothed=[],particles=[],oldHands=[],interval=100,lastInfer=0,lastVideoTime=-1,lastFrame=0,frameN=0,fpsFrom=performance.now(),raf=0,cover=null,demoMouse={x:.7,y:.52,active:false};
 const oldTips=[new Map(),new Map()];
 let candidate=null,lastCreatedPose=null,lastLandmarkAt=0;
+let trackerWorker=null,workerReady=false,workerBusy=false,trackerEpoch=0,workerLastMs=0,workerFallback=false,lastPaint=0;
 const drumStates=[null,null];let drumLastInference=-1,drumHits=[];
 const strumStates=[null,null],strumQueue=[],strumWaves=[];let strumLastInference=-1;
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n)),dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),mix=(a,b,t)=>a+(b-a)*t;
-function resize(){const d=Math.min(devicePixelRatio||1,innerWidth<900?1.5:2),w=innerWidth,h=$('stage').clientHeight||innerHeight;canvas.width=Math.round(w*d);canvas.height=Math.round(h*d);ctx.setTransform(d,0,0,d,0,0);return {w,h}}let size=resize();addEventListener('resize',()=>{size=resize();smoothed=[];candidate=null;resetGesture()});
+function resize(){const d=Math.min(devicePixelRatio||1,innerWidth<900?(ui.quality?.value==='smooth'?1.25:1):1.5),w=innerWidth,h=$('stage').clientHeight||innerHeight;canvas.width=Math.round(w*d);canvas.height=Math.round(h*d);ctx.setTransform(d,0,0,d,0,0);return {w,h}}let size=resize();addEventListener('resize',()=>{size=resize();smoothed=[];candidate=null;resetGesture()});
 if(!isSecureContext)ui.secureHint.textContent='手機鏡頭需要 HTTPS 安全網址，請勿直接開啟本機檔案。';
 function resetGesture(){oldTips.forEach(x=>x.clear());drumStates.fill(null);drumLastInference=-1;strumStates.fill(null);strumLastInference=-1}
 function rectCover(w,h,vw,vh){const z=Math.max(w/vw,h/vh);return {x:(w-vw*z)/2,y:(h-vh*z)/2,w:vw*z,h:vh*z}}
 function mapPoint(p,r){return {x:r.x+(facing==='user'?1-p.x:p.x)*r.w,y:r.y+p.y*r.h}}
 function smooth(raw){if(raw.length===2&&smoothed.length===2){const same=dist(raw[0][9],smoothed[0][9])+dist(raw[1][9],smoothed[1][9]),flip=dist(raw[0][9],smoothed[1][9])+dist(raw[1][9],smoothed[0][9]);if(flip<same)raw.reverse()}else if(raw.length===2)raw.sort((a,b)=>a[9].x-b[9].x);
  const out=raw.map((hand,k)=>hand.map((p,i)=>smoothed[k]&&smoothed[k][i]?{x:mix(smoothed[k][i].x,p.x,.65),y:mix(smoothed[k][i].y,p.y,.65)}:p));smoothed=out;return out}
+
+function stopTrackerWorker(){
+ workerReady=false;workerBusy=false;trackerEpoch++;
+ if(trackerWorker){trackerWorker.terminate();trackerWorker=null;}
+}
+function acceptLandmarks(raw,t){
+ const v=rectCover(size.w,size.h,video.videoWidth||480,video.videoHeight||360);
+ cover=v;hands=smooth(raw.map(hand=>hand.map(p=>mapPoint(p,v))));lastLandmarkAt=t;
+}
+function workerFailure(reason){
+ console.warn('Background hand tracking failed:',reason);
+ stopTrackerWorker();
+ if(mode==='camera'&&!workerFallback&&!model){
+  workerFallback=true;ui.status.textContent='切換相容辨識模式…';
+  makeModel().then(m=>{if(mode==='camera'){model=m;ui.mode.textContent='相容追蹤';ui.status.textContent='相容模式已啟動'}else m.close?.()})
+    .catch(e=>{ui.status.textContent='手部追蹤失敗：'+(e.message||e)});
+ }
+}
+function beginWorker(){
+ return new Promise((resolve,reject)=>{
+  let settled=false,w,timeout;
+  const fail=e=>{
+   if(settled){workerFailure(e);return}
+   settled=true;clearTimeout(timeout);stopTrackerWorker();
+   reject(e instanceof Error?e:new Error(String(e)));
+  };
+  try{
+   w=new Worker(new URL('hand-worker.js?v=8',location.href),{type:'module'});
+   trackerWorker=w;
+   timeout=setTimeout(()=>fail(new Error('背景辨識載入逾時')),14000);
+   w.onmessage=({data})=>{
+    if(data?.type==='ready'){
+     if(settled)return;settled=true;clearTimeout(timeout);
+     workerReady=true;workerBusy=false;resolve();return;
+    }
+    if(data?.type==='result'){
+     workerBusy=false;workerLastMs=data.processingMs||0;
+     if(mode==='camera'&&data.epoch===trackerEpoch)acceptLandmarks(data.landmarks||[],performance.now());
+     return;
+    }
+    if(data?.type==='error'||data?.type==='fatal')fail(data.reason||'背景辨識異常');
+   };
+   w.onerror=e=>{e.preventDefault?.();fail(e.message||'背景 Worker 錯誤')};
+   w.postMessage({type:'init'});
+  }catch(e){fail(e)}
+ });
+}
+async function initTracking(){
+ workerFallback=false;model=null;
+ if(typeof Worker==='function'&&typeof createImageBitmap==='function'){
+  ui.status.textContent='初始化背景辨識，讓畫面更流暢…';
+  try{await beginWorker();ui.status.textContent='背景辨識已啟動';return}
+  catch(e){console.warn('Background processing unavailable:',e)}
+ }
+ ui.status.textContent='載入相容辨識…';model=await makeModel();
+}
 async function makeModel(){ui.status.textContent='下載手部辨識模型…';const m=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/vision_bundle.mjs');const fs=await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm');const o={baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:.5,minHandPresenceConfidence:.45,minTrackingConfidence:.5};try{return await m.HandLandmarker.createFromOptions(fs,o)}catch(e){console.warn('GPU fallback',e);o.baseOptions.delegate='CPU';return await m.HandLandmarker.createFromOptions(fs,o)}}
 async function enableSound(){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)throw Error('不支援 Web Audio');audio=audio||new AC();if(audio.state!=='running')await audio.resume()}
 function beep(freq,len){if(!audio||audio.state!=='running')return;const t=audio.currentTime,level=Math.max(.001,Number(ui.volume.value)/100*.16),out=audio.createGain(),filter=audio.createBiquadFilter();filter.type='lowpass';filter.frequency.value=clamp(1800+len*2,1900,5500);filter.connect(out);out.connect(audio.destination);out.gain.setValueAtTime(.0001,t);out.gain.exponentialRampToValueAtTime(level,t+.012);out.gain.exponentialRampToValueAtTime(.0001,t+.8);
@@ -198,11 +255,11 @@ function drawDrumHits(t){
  }
 }
 
-function burst(p,hue){for(let i=0;i<12;i++){const a=Math.random()*Math.PI*2,z=1+Math.random()*5;particles.push({x:p.x,y:p.y,vx:Math.cos(a)*z,vy:Math.sin(a)*z,life:1,hue})}if(particles.length>230)particles.splice(0,particles.length-230)}
+function burst(p,hue){const count=ui.quality.value==='smooth'?12:ui.quality.value==='eco'?5:8;for(let i=0;i<count;i++){const a=Math.random()*Math.PI*2,z=1+Math.random()*5;particles.push({x:p.x,y:p.y,vx:Math.cos(a)*z,vy:Math.sin(a)*z,life:1,hue})}if(particles.length>140)particles.splice(0,particles.length-140)}
 function pluck(s,t,p){if(!s?.a||t-s.lastHit<160)return false;s.lastHit=t;s.amp=clamp(s.len*.035,10,28);burst(p||{x:(s.a.x+s.b.x)/2,y:(s.a.y+s.b.y)/2},s.hue);beep(s.freq,s.len);return true}
-function started(m){cancelAnimationFrame(raf);strings.length=0;candidate=null;lastCreatedPose=null;drumHits=[];strumQueue.length=0;strumWaves.length=0;resetGesture();ui.strumStatus.textContent='🖐 右揮由上往下，左揮由下往上';refreshStringUI();ui.drumStatus.textContent='🥁 握拳向下敲，位置越高鼓聲越高';mode=m;ui.welcome.classList.add('hidden');ui.controls.classList.remove('hidden');ui.flip.style.display=m==='camera'?'':'none';ui.mode.textContent=m==='camera'?'即時鏡頭':'展示';ui.status.textContent=m==='camera'?'追蹤中':'展示中';lastFrame=performance.now();raf=requestAnimationFrame(tick)}
-function cleanup(){cancelAnimationFrame(raf);candidate=null;lastCreatedPose=null;strings.length=0;drumHits=[];strumQueue.length=0;strumWaves.length=0;resetGesture();refreshStringUI();mode='idle';if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;model=null;hands=[];smoothed=[];resetGesture();ui.welcome.classList.remove('hidden');ui.controls.classList.add('hidden');ui.status.textContent='尚未啟動';ui.error.textContent=''}
-ui.start.addEventListener('click',async()=>{ui.error.textContent='';ui.start.disabled=true;ui.start.textContent='正在啟動…';try{if(!navigator.mediaDevices?.getUserMedia)throw Error('無法取得相機：請使用 HTTPS 網址');await enableSound();stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:30},facingMode:facing}});video.srcObject=stream;await video.play();model=await makeModel();lastVideoTime=-1;started('camera')}catch(e){console.error(e);ui.error.textContent='啟動失敗：'+(e.message||e)+'。請檢查相機授權、網路或改用展示模式。';if(stream)stream.getTracks().forEach(t=>t.stop());stream=null}finally{ui.start.disabled=false;ui.start.textContent='📷 開啟鏡頭，開始玩'}});
+function started(m){cancelAnimationFrame(raf);lastPaint=0;strings.length=0;candidate=null;lastCreatedPose=null;drumHits=[];strumQueue.length=0;strumWaves.length=0;resetGesture();ui.strumStatus.textContent='🖐 右揮由上往下，左揮由下往上';refreshStringUI();ui.drumStatus.textContent='🥁 握拳向下敲，位置越高鼓聲越高';mode=m;ui.welcome.classList.add('hidden');ui.controls.classList.remove('hidden');ui.flip.style.display=m==='camera'?'':'none';ui.mode.textContent=m==='camera'?(workerReady?'背景追蹤':'相容追蹤'):'展示';ui.status.textContent=m==='camera'?'追蹤中':'展示中';lastFrame=performance.now();raf=requestAnimationFrame(tick)}
+function cleanup(){cancelAnimationFrame(raf);stopTrackerWorker();model?.close?.();model=null;candidate=null;lastCreatedPose=null;strings.length=0;drumHits=[];strumQueue.length=0;strumWaves.length=0;resetGesture();refreshStringUI();mode='idle';if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;model=null;hands=[];smoothed=[];resetGesture();ui.welcome.classList.remove('hidden');ui.controls.classList.add('hidden');ui.status.textContent='尚未啟動';ui.error.textContent=''}
+ui.start.addEventListener('click',async()=>{ui.error.textContent='';ui.start.disabled=true;ui.start.textContent='正在啟動…';try{if(!navigator.mediaDevices?.getUserMedia)throw Error('無法取得相機：請使用 HTTPS 網址');await enableSound();stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{width:{ideal:480},height:{ideal:360},frameRate:{ideal:24,max:24},facingMode:facing}});video.srcObject=stream;await video.play();await initTracking();lastVideoTime=-1;started('camera')}catch(e){console.error(e);ui.error.textContent='啟動失敗：'+(e.message||e)+'。請檢查相機授權、網路或改用展示模式。';if(stream)stream.getTracks().forEach(t=>t.stop());stream=null}finally{ui.start.disabled=false;ui.start.textContent='📷 開啟鏡頭，開始玩'}});
 ui.demo.addEventListener('click',async()=>{try{await enableSound()}catch(e){console.warn(e)}started('demo')});
 
 function refreshStringUI(){
@@ -213,8 +270,8 @@ function refreshStringUI(){
 ui.undoString.addEventListener('click',()=>{if(!strings.length)return;strings.pop();candidate=null;lastCreatedPose=null;resetGesture();refreshStringUI();ui.status.textContent='已撤銷上一條，可重新拉弦';});
 ui.clearStrings.addEventListener('click',()=>{strings.length=0;candidate=null;lastCreatedPose=null;resetGesture();refreshStringUI();ui.status.textContent='已清空所有琴弦';});
 ui.stop.addEventListener('click',cleanup);
-ui.flip.addEventListener('click',async()=>{if(mode!=='camera')return;candidate=null;lastCreatedPose=null;resetGesture();const previous=facing;facing=facing==='user'?'environment':'user';if(stream)stream.getTracks().forEach(t=>t.stop());try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{width:{ideal:640},height:{ideal:480},facingMode:facing}});video.srcObject=stream;await video.play();smoothed=[];hands=[];resetGesture();lastVideoTime=-1}catch(e){facing=previous;ui.status.textContent='無法切換鏡頭'}});
-ui.quality.addEventListener('change',()=>{interval=ui.quality.value==='eco'?110:ui.quality.value==='smooth'?50:65});
+ui.flip.addEventListener('click',async()=>{if(mode!=='camera')return;candidate=null;lastCreatedPose=null;resetGesture();const previous=facing;facing=facing==='user'?'environment':'user';if(stream)stream.getTracks().forEach(t=>t.stop());try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{width:{ideal:480},height:{ideal:360},facingMode:facing}});video.srcObject=stream;await video.play();smoothed=[];hands=[];resetGesture();lastVideoTime=-1}catch(e){facing=previous;ui.status.textContent='無法切換鏡頭'}});
+ui.quality.addEventListener('change',()=>{interval=ui.quality.value==='eco'?145:ui.quality.value==='smooth'?75:100;size=resize();});
 ui.drumEnabled.addEventListener('change',()=>{drumStates.fill(null);ui.drumStatus.textContent=ui.drumEnabled.checked?'🥁 握拳向下敲，位置越高鼓聲越高':'🥁 鼓聲已關閉'});
 ui.strumEnabled.addEventListener('change',()=>{strumStates.fill(null);ui.strumStatus.textContent=ui.strumEnabled.checked?'🖐 右揮由上往下，左揮由下往上':'🖐 揮掌掃弦已關閉';});
 ui.share.addEventListener('click',async()=>{try{if(navigator.share)await navigator.share({title:'空中光弦',url:location.href,text:'伸出雙手，用手機鏡頭彈光弦！'});else if(navigator.clipboard){await navigator.clipboard.writeText(location.href);ui.status.textContent='已複製分享網址'}else prompt('複製網址',location.href)}catch(e){if(e.name!=='AbortError')ui.status.textContent='分享失敗'}});
@@ -222,8 +279,30 @@ ui.shot.addEventListener('click',()=>{const a=document.createElement('a');a.href
 canvas.addEventListener('pointermove',e=>{if(mode==='demo'){const r=canvas.getBoundingClientRect();demoMouse={x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height,active:true}}});
 canvas.addEventListener('pointerdown',e=>{if(mode==='demo'){const r=canvas.getBoundingClientRect(),p={x:e.clientX-r.left,y:e.clientY-r.top};if(ui.drumEnabled.checked)fireDrum(p,performance.now());else if(strings.length)pluck(strings[0],performance.now(),p)}});
 function demoHand(x,y,side,t){const {w,h}=size,dx=side===0?-1:1,p=Array.from({length:21},()=>({x:x*w,y:y*h}));p[0]={x:x*w,y:(y+.13)*h};for(let j=0;j<5;j++){const k=[1,5,9,13,17][j];for(let n=0;n<4;n++)p[k+n]={x:(x+dx*(j-2)*.028+dx*n*.008)*w,y:(y-.01-n*.025+.008*Math.sin(t*.001+j+side))*h}}return p}
-function update(t){if(mode==='demo'){const x=demoMouse.active?demoMouse.x:.7,y=demoMouse.active?demoMouse.y:.50;hands=[demoHand(.28+.04*Math.sin(t*.0006),.53,0,t),demoHand(clamp(x,.4,.88),clamp(y,.3,.76),1,t)];return}if(mode!=='camera'||!model||video.readyState<2)return;if(t-lastInfer<interval||video.currentTime===lastVideoTime)return;lastInfer=t;lastVideoTime=video.currentTime;try{const r=model.detectForVideo(video,t),v=rectCover(size.w,size.h,video.videoWidth||640,video.videoHeight||480);cover=v;hands=smooth(r.landmarks.map(hand=>hand.map(p=>mapPoint(p,v))));lastLandmarkAt=t}catch(e){console.error(e);ui.status.textContent='辨識異常'}}
 
+function update(t){
+ if(mode==='demo'){
+  const x=demoMouse.active?demoMouse.x:.7,y=demoMouse.active?demoMouse.y:.5;
+  hands=[demoHand(.28+.04*Math.sin(t*.0006),.53,0,t),demoHand(clamp(x,.4,.88),clamp(y,.3,.76),1,t)];
+  return;
+ }
+ if(mode!=='camera'||video.readyState<2||(!workerReady&&!model))return;
+ if(t-lastInfer<interval||video.currentTime===lastVideoTime)return;
+ if(workerReady){
+  if(workerBusy)return;
+  workerBusy=true;lastInfer=t;lastVideoTime=video.currentTime;
+  const epoch=trackerEpoch;
+  createImageBitmap(video).then(bitmap=>{
+   if(!workerReady||mode!=='camera'||epoch!==trackerEpoch){bitmap.close?.();workerBusy=false;return;}
+   try{trackerWorker.postMessage({type:'detect',bitmap,timestamp:t,epoch},[bitmap])}
+   catch(e){bitmap.close?.();workerFailure(e)}
+  }).catch(e=>workerFailure(e));
+  return;
+ }
+ lastInfer=t;lastVideoTime=video.currentTime;
+ try{const result=model.detectForVideo(video,t);acceptLandmarks(result.landmarks||[],t)}
+ catch(e){console.error(e);ui.status.textContent='手部辨識異常'}
+}
 function buildStrings(){
  for(const s of strings){s.a={x:s.an.x*size.w,y:s.an.y*size.h};s.b={x:s.bn.x*size.w,y:s.bn.y*size.h};s.len=dist(s.a,s.b);s.amp*=.95;}
 }
@@ -237,7 +316,7 @@ function currentIndexPose(){
 function samePose(p,q,r){return p&&q&&dist(p.a,q.a)<r&&dist(p.b,q.b)<r}
 function updateDraft(t){
  const pose=currentIndexPose(),d=Math.min(size.w,size.h);
- if(!pose||(mode==='camera'&&t-lastLandmarkAt>400)){candidate=null;return;}
+ if(!pose||(mode==='camera'&&t-lastLandmarkAt>650)){candidate=null;return;}
  if(strings.length>=MAX_STRINGS){candidate=null;return;}
  if(samePose(pose,lastCreatedPose,Math.max(37,d*.10))){candidate=null;return;}
  if(strings.some(s=>samePose(pose,{a:s.a,b:s.b},Math.max(18,d*.055)))){candidate=null;return;}
@@ -293,14 +372,14 @@ function gesture(t){
  });
  for(let i=hands.length;i<2;i++)oldTips[i].clear();
 }
-function drawBackground(){const {w,h}=size;if(mode==='camera'&&video.readyState>=2){const r=rectCover(w,h,video.videoWidth||640,video.videoHeight||480);cover=r;if(ui.showCam.checked){ctx.save();if(facing==='user'){ctx.translate(w,0);ctx.scale(-1,1)}ctx.drawImage(video,r.x,r.y,r.w,r.h);ctx.restore();ctx.fillStyle='rgba(6,10,22,.20)';ctx.fillRect(0,0,w,h)}else{ctx.fillStyle='#08111d';ctx.fillRect(0,0,w,h)}}else{ctx.fillStyle='#07111c';ctx.fillRect(0,0,w,h);const g=ctx.createRadialGradient(w*.5,h*.4,20,w*.5,h*.4,w*.9);g.addColorStop(0,'#183047');g.addColorStop(1,'#07111c');ctx.fillStyle=g;ctx.fillRect(0,0,w,h)}}
+function drawBackground(){const {w,h}=size;if(mode==='camera'&&video.readyState>=2){const r=rectCover(w,h,video.videoWidth||480,video.videoHeight||360);cover=r;if(ui.showCam.checked){ctx.save();if(facing==='user'){ctx.translate(w,0);ctx.scale(-1,1)}ctx.drawImage(video,r.x,r.y,r.w,r.h);ctx.restore();ctx.fillStyle='rgba(6,10,22,.20)';ctx.fillRect(0,0,w,h)}else{ctx.fillStyle='#08111d';ctx.fillRect(0,0,w,h)}}else{ctx.fillStyle='#07111c';ctx.fillRect(0,0,w,h);const g=ctx.createRadialGradient(w*.5,h*.4,20,w*.5,h*.4,w*.9);g.addColorStop(0,'#183047');g.addColorStop(1,'#07111c');ctx.fillStyle=g;ctx.fillRect(0,0,w,h)}}
 
 function drawString(s,t){
  const a=s.a,b=s.b,len=s.len,nx=-(b.y-a.y)/(len||1),ny=(b.x-a.x)/(len||1);
  ctx.save();ctx.globalCompositeOperation='screen';ctx.lineCap='round';
- for(const [width,alpha,blur] of [[12,.13,15],[4,.30,7],[1.2,.95,0]]){
+ for(const [width,alpha,blur] of (ui.quality.value==='smooth'?[[12,.13,12],[4,.30,5],[1.2,.95,0]]:ui.quality.value==='eco'?[[4,.26,3],[1.2,.95,0]]:[[6,.21,5],[1.2,.95,0]])){
   ctx.beginPath();
-  for(let j=0;j<=30;j++){const u=j/30,warp=Math.sin(u*Math.PI)*Math.sin(u*22-t*.05)*s.amp;
+  const seg=ui.quality.value==='smooth'?26:14;for(let j=0;j<=seg;j++){const u=j/seg,warp=Math.sin(u*Math.PI)*Math.sin(u*22-t*.05)*s.amp;
    const x=mix(a.x,b.x,u)+nx*warp,y=mix(a.y,b.y,u)+ny*warp;
    if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
   ctx.strokeStyle='hsla('+s.hue+',92%,78%,'+alpha+')';
@@ -316,11 +395,14 @@ function drawParticles(){ctx.save();ctx.globalCompositeOperation='screen';partic
 
 function tick(t){
  if(mode==='idle')return;
+ const minPaint=mode==='camera'?(ui.quality.value==='eco'?50:ui.quality.value==='smooth'?32:40):32;
+ if(t-lastPaint<minPaint){raf=requestAnimationFrame(tick);return}
+ lastPaint=t;
  drawBackground();update(t);processDrumHands(t);buildStrings();updateDraft(t);processPalmStrums(t);gesture(t);runStrumQueue(t);
  strings.forEach(s=>drawString(s,t));drawDraft(t);
  if(ui.showPoints.checked)hands.forEach(drawHand);drawParticles();drawDrumHits(t);drawStrumWaves(t);frameN++;
  if(t-fpsFrom>900){const fps=Math.round(frameN*1000/(t-fpsFrom));ui.fps.textContent='FPS '+fps;
-  if(mode==='camera'&&ui.quality.value==='auto')interval=fps<18?115:fps<25?85:65;fpsFrom=t;frameN=0;}
+  if(mode==='camera'&&ui.quality.value==='auto')interval=workerReady?100:(fps<16?150:fps<23?120:90);fpsFrom=t;frameN=0;}
  ui.hands.textContent='手部 '+hands.length+' / 2';lastFrame=t;raf=requestAnimationFrame(tick);
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden)resetGesture()});
