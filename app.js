@@ -208,7 +208,7 @@ ui.demo.addEventListener('click',async()=>{try{await enableSound()}catch(e){cons
 function refreshStringUI(){
  ui.stringCount.textContent='琴弦 '+strings.length+'/'+MAX_STRINGS;
  ui.undoString.disabled=strings.length===0;ui.clearStrings.disabled=strings.length===0;
- ui.help.textContent=strings.length?'已固定 '+strings.length+' 條 · 雙食指拉新弦，食指／中指掃過固定弦撥奏':'雙食指拉出光弦，保持 1 秒固定，再撥弦演奏';
+ ui.help.textContent=strings.length?'已固定 '+strings.length+' 條 · 張掌右揮上→下、左揮下→上 · 握拳敲鼓':'雙食指拉弦穩住 1 秒 · 張掌左右掃弦 · 握拳敲鼓';
 }
 ui.undoString.addEventListener('click',()=>{if(!strings.length)return;strings.pop();candidate=null;lastCreatedPose=null;resetGesture();refreshStringUI();ui.status.textContent='已撤銷上一條，可重新拉弦';});
 ui.clearStrings.addEventListener('click',()=>{strings.length=0;candidate=null;lastCreatedPose=null;resetGesture();refreshStringUI();ui.status.textContent='已清空所有琴弦';});
