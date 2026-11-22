@@ -1,9 +1,9 @@
-# 空中光弦｜Air Strings Mobile V7
+# 空中光弦｜Air Strings Mobile V8
 
 使用手機前鏡頭、Google MediaPipe Hand Landmarker、Canvas 2D、Web Audio 製作的免費互動光弦。這是獨立原創示範，不是 Sonic Deadhorse 的原始作品。
 
 ## 網站
-https://tornadolee1720.github.io/TEST/?v=7
+https://tornadolee1720.github.io/TEST/?v=8
 
 ## 手機玩法
 1. 用 iPhone Safari 或 Android Chrome 開啟 HTTPS 網頁，按「開啟鏡頭，開始玩」，授權相機（首次需下載 MediaPipe 模型）。
@@ -40,3 +40,17 @@ https://tornadolee1720.github.io/TEST/?v=7
 
 ## V7 驗證
 已以模擬追蹤座標測試：張掌識別、拳頭排除、右揮上→下的音序、左揮下→上的音序、依序逐音觸發、防止拉弦中掃弦、停住不重複掃弦；JS 語法及 UI 元件檢查。手機實機手勢敏感度仍需檢驗。
+
+## V8 手機卡頓優化（2026-11-22）
+- **主要修正**：將 MediaPipe `detectForVideo()` 從網頁主執行緒移到獨立 `hand-worker.js`（CPU Worker），用 `ImageBitmap` 傳送影格，完成辨識後只回傳 21 點 × 最多兩手的座標，避免手勢辨識反覆阻塞 UI 繪製。部分瀏覽器可能不支援 Worker 路線，此時自動退回原本的主執行緒 GPU / CPU 相容模式。
+- **攝影機尺寸**：理想解析度從 640×480 調降為 480×360，24 fps 上限，實際取決於裝置支援。
+- **繪圖效能**：手機一般與省電模式使用 1× canvas 像素比例；一般模式每條弦兩層光暈，線段數由 30 降到 14；粒子數量降低，渲染上限自動調節約 20–25 FPS（流暢模式約 30 FPS）。
+- **手勢辨識率**：背景辨識每約 100 毫秒可發一幀，且採同時僅處理一張影格的背壓控制（drop-while-busy），避免畫面延遲越積越大。真實辨識速度以手機 CPU 與瀏覽器支援為準。
+- **顯示節點**：手機預設關閉節點顯示，使用者仍可切回開啟。
+- **原本玩法維持**：雙食指穩定 1 秒建弦、食指／中指單弦撥奏、張掌左右掃弦、握拳打鼓與高低音映射。
+- **驗證**：已檢查 JS 語法、GitHub 檔案及 HTML 控制項對應、Canvas 手機 pixel ratio、辨識間隔與核心手勢函式。Worker 的真實模型載入和手機 FPS 必須實機測試；此版本不宣稱一定達到 30 FPS。
+
+### V8 Troubleshooting
+- 開頁面後版本標示應為 `MOBILE V8`。若仍為 V7，重新整理或使用 `?v=8` 連結。
+- 畫面左上角顯示「背景追蹤」代表 Worker 成功；顯示「相容追蹤」代表瀏覽器採用回退辨識模式。
+- 仍感覺卡時，把「效能」切到「省電」，保持「節點」關閉；若還是無法操作，回報手機型號、使用的瀏覽器、顯示的 FPS 與「背景追蹤／相容追蹤」。
