@@ -5,7 +5,7 @@ const ui={welcome:$('welcome'),start:$('start'),demo:$('demo'),error:$('error'),
 const TIP=[4,8,12,16,20];
 const HUE=[43,168,202,315,62,124,270,10,189,339];
 const SCALE=[['C4',261.63],['D4',293.66],['E4',329.63],['G4',392],['A4',440],['C5',523.25],['D5',587.33],['E5',659.25],['G5',783.99],['A5',880]];
-const MAX_STRINGS=10,HOLD_MS=3000;
+const MAX_STRINGS=10,HOLD_MS=1000;
 const strings=[]; 
 let mode='idle',facing='user',stream=null,model=null,audio=null,hands=[],smoothed=[],particles=[],oldHands=[],interval=65,lastInfer=0,lastVideoTime=-1,lastFrame=0,frameN=0,fpsFrom=performance.now(),raf=0,cover=null,demoMouse={x:.7,y:.52,active:false};
 const oldTips=[new Map(),new Map()];
@@ -32,7 +32,7 @@ ui.demo.addEventListener('click',async()=>{try{await enableSound()}catch(e){cons
 function refreshStringUI(){
  ui.stringCount.textContent='琴弦 '+strings.length+'/'+MAX_STRINGS;
  ui.undoString.disabled=strings.length===0;ui.clearStrings.disabled=strings.length===0;
- ui.help.textContent=strings.length?'已固定 '+strings.length+' 條 · 雙食指拉新弦，食指／中指掃過固定弦撥奏':'雙食指拉出光弦，保持 3 秒固定，再撥弦演奏';
+ ui.help.textContent=strings.length?'已固定 '+strings.length+' 條 · 雙食指拉新弦，食指／中指掃過固定弦撥奏':'雙食指拉出光弦，保持 1 秒固定，再撥弦演奏';
 }
 ui.undoString.addEventListener('click',()=>{if(!strings.length)return;strings.pop();candidate=null;lastCreatedPose=null;resetGesture();refreshStringUI();ui.status.textContent='已撤銷上一條，可重新拉弦';});
 ui.clearStrings.addEventListener('click',()=>{strings.length=0;candidate=null;lastCreatedPose=null;resetGesture();refreshStringUI();ui.status.textContent='已清空所有琴弦';});
@@ -87,8 +87,8 @@ function drawDraft(t){
  for(const p of [a,b]){ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fillStyle='#f9e2b7';ctx.fill()}
  ctx.shadowBlur=5;ctx.strokeStyle='#f6e2b0';ctx.lineWidth=4;ctx.beginPath();ctx.arc(mx,my-30,19,-Math.PI/2,-Math.PI/2+Math.PI*2*progress);ctx.stroke();
  ctx.globalCompositeOperation='source-over';ctx.fillStyle='#fff3dd';ctx.font='bold 16px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
- ctx.fillText(String(Math.max(1,Math.ceil((HOLD_MS-(t-candidate.startedAt))/1000))),mx,my-30);
- ctx.font='bold 12px system-ui';ctx.fillText('穩住 3 秒固定',mx,my-59);ctx.restore();
+ ctx.fillText(Math.max(0,(HOLD_MS-(t-candidate.startedAt))/1000).toFixed(1),mx,my-30);
+ ctx.font='bold 12px system-ui';ctx.fillText('穩住 1 秒固定',mx,my-59);ctx.restore();
 }
 function offset(p,a,b){const dx=b.x-a.x,dy=b.y-a.y;return(dx*(p.y-a.y)-dy*(p.x-a.x))/(Math.hypot(dx,dy)||1)}
 function projection(p,a,b){const dx=b.x-a.x,dy=b.y-a.y,den=dx*dx+dy*dy||1;return clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/den,0,1)}
