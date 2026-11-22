@@ -7,21 +7,21 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="description" content="打開手機前鏡頭，讓雙手在空中彈奏發光琴弦。無需安裝 App。" />
-  <title>Air Strings｜手機空中光弦實驗室 V5.1</title>
-  <link rel="stylesheet" href="style.css?v=5.1" />
+  <title>Air Strings｜手機空中光弦實驗室 V6</title>
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
   <main id="stage">
     <canvas id="scene" aria-label="即時雙手追蹤與空中光弦"></canvas>
     <header class="hud">
-      <div class="brand"><span class="eyebrow">UNCLE GLASSES · CREATIVE LAB</span><h1>空中光弦 <small>MOBILE V5.1</small></h1></div>
+      <div class="brand"><span class="eyebrow">UNCLE GLASSES · CREATIVE LAB</span><h1>空中光弦 <small>MOBILE V6</small></h1></div>
       <div class="metrics"><span id="status">尚未啟動</span><span id="hands">手部 0 / 2</span><span id="fps">FPS --</span><span id="mode">待機</span></div>
     </header>
     <section id="welcome" class="welcome" role="dialog" aria-label="空中光弦啟動">
       <div class="welcome-inner">
         <div class="pill">免安裝 · 手機前鏡頭 · 即時互動</div>
         <h2>把手伸進鏡頭。<br/><em>空氣，就會發光。</em></h2>
-        <p>雙手伸出<strong>食指</strong>，在畫面拉出一條弦，<strong>穩住 1 秒</strong>就會自動固定。把食指移到新位置繼續創作，再用食指或中指掃過已固定的弦，就會發出各自的音階。</p>
+        <p>雙手伸出<strong>食指</strong>，在畫面拉出一條弦，<strong>穩住 1 秒</strong>就會自動固定。把食指移到新位置繼續創作，掃過已固定的弦就能彈奏。<strong>握拳往下敲，還會打出鼓聲！</strong>拳頭越高，鼓聲越高；越低，鼓聲越沉。</p>
         <div class="actions"><button id="start">📷 開啟鏡頭，開始玩</button><button id="demo" class="secondary">先看展示模式</button></div>
         <p class="tiny">第一次會詢問相機權限，模型需要連網下載。相機影格在本機辨識、不由本站上傳；第三方 MediaPipe 可能收集 SDK 使用統計。</p>
         <p class="tiny" id="secureHint"></p>
@@ -29,18 +29,19 @@
       </div>
     </section>
     <footer id="controls" class="controls hidden">
-      <div class="guide" id="help">兩隻食指拉出光弦，穩住 1 秒自動固定，再撥弦演奏</div>
+      <div class="guide" id="help">雙食指拉弦 1 秒固定 · 握拳敲鼓，上高下低</div>
+      <div id="drumStatus" class="drum-status" aria-live="polite">🥁 握拳向下敲，位置越高鼓聲越高</div>
       <div class="toolbar">
         <label class="tool-toggle"><input id="showCam" type="checkbox" checked /><span>真人</span></label>
         <label class="tool-toggle"><input id="showPoints" type="checkbox" checked /><span>節點</span></label>
         <label class="vol"><span>音量</span><input id="volume" type="range" min="0" max="100" value="55" aria-label="音量" /></label>
-        <label class="quality-label">效能<select id="quality" aria-label="畫面效能"><option value="auto">自動</option><option value="eco">省電</option><option value="smooth">流暢</option></select></label><span id="stringCount" class="strings-count" aria-live="polite">琴弦 0/10</span><button id="undoString" class="small" type="button" disabled>撤銷上一條</button><button id="clearStrings" class="small" type="button" disabled>清空</button><button id="flip" class="small">切鏡頭</button><button id="share" class="small">分享</button>
+        <label class="quality-label">效能<select id="quality" aria-label="畫面效能"><option value="auto">自動</option><option value="eco">省電</option><option value="smooth">流暢</option></select></label><label class="tool-toggle"><input id="drumEnabled" type="checkbox" checked /><span>🥁 鼓聲</span></label><span id="stringCount" class="strings-count" aria-live="polite">琴弦 0/10</span><button id="undoString" class="small" type="button" disabled>撤銷上一條</button><button id="clearStrings" class="small" type="button" disabled>清空</button><button id="flip" class="small">切鏡頭</button><button id="share" class="small">分享</button>
         <button id="shot" class="small">拍照</button>
         <button id="stop" class="small">結束</button>
       </div>
     </footer>
   </main>
   <video id="camera" autoplay muted playsinline style="display:none"></video>
-  <script defer src="app.js?v=5.1"></script>
+  <script defer src="app.js?v=6"></script>
 </body>
 </html>
