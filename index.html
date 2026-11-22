@@ -14,7 +14,7 @@
   <main id="stage">
     <canvas id="scene" aria-label="即時雙手追蹤與空中光弦"></canvas>
     <header class="hud">
-      <div class="brand"><span class="eyebrow">UNCLE GLASSES · CREATIVE LAB</span><h1>空中光弦 <small>MOBILE V3</small></h1></div>
+      <div class="brand"><span class="eyebrow">UNCLE GLASSES · CREATIVE LAB</span><h1>空中光弦 <small>MOBILE V4</small></h1></div>
       <div class="metrics"><span id="status">尚未啟動</span><span id="hands">手部 0 / 2</span><span id="fps">FPS --</span><span id="mode">待機</span></div>
     </header>
     <section id="welcome" class="welcome" role="dialog" aria-label="空中光弦啟動">
@@ -34,7 +34,7 @@
         <label class="tool-toggle"><input id="showCam" type="checkbox" checked /><span>真人</span></label>
         <label class="tool-toggle"><input id="showPoints" type="checkbox" checked /><span>節點</span></label>
         <label class="vol"><span>音量</span><input id="volume" type="range" min="0" max="100" value="55" aria-label="音量" /></label>
-        <label class="quality-label">效能<select id="quality" aria-label="畫面效能"><option value="auto">自動</option><option value="eco">省電</option><option value="smooth">流暢</option></select></label><button id="flip" class="small">切鏡頭</button><button id="share" class="small">分享</button>
+        <label class="quality-label">效能<select id="quality" aria-label="畫面效能"><option value="auto">自動</option><option value="eco">省電</option><option value="smooth">流暢</option></select></label><button id="lockStrings" class="small lock-strings" type="button" aria-pressed="false">📌 固定琴弦</button><button id="flip" class="small">切鏡頭</button><button id="share" class="small">分享</button>
         <button id="shot" class="small">拍照</button>
         <button id="stop" class="small">結束</button>
       </div>
